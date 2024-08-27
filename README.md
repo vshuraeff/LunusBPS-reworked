@@ -7,6 +7,9 @@ I've also added a new UI and use httpX instead of requests.
 I've added a proxy backup feature, so you can always go back to the previous scan.
 I've added command-line arguments, so you can configure the program without the need to edit the code.
 
+## 📸 Screenshots
+[![Proxy-Digger-Screenshot.png](https://i.postimg.cc/66fyRtbh/Proxy-Digger-Screenshot.png)](https://postimg.cc/MXX6J2Sc)
+
 ## 🔥 Features
 - Proxy Scraper
 - Proxy Checker
