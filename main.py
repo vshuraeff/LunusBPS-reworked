@@ -1,26 +1,28 @@
-import os, concurrent.futures, time, threading, random, string, json, ctypes, sys
+import os, sys, shutil
+from concurrent.futures import ThreadPoolExecutor
+import time
+import string
+import sys
+import argparse
+from pathlib import Path
 
-try:
-    import httpx as http
-    import colorama, pystyle, datetime, aiosocks, asyncio, aiohttp_socks, socks, socket, tls_client
-except ModuleNotFoundError:
-    os.system("pip install httpx")
-    os.system("pip install colorama")
-    os.system("pip install pystyle")
-    os.system("pip install datetime")
-    os.system("pip install aiosocks")
-    os.system("pip install asyncio")
-    os.system("pip install aiohttp-socks")
-    os.system("pip install socks")
-    os.system("pip install socket")
-    os.system("pip install tls_client")
+import httpx as http
+import aiosocks
+import asyncio
+import aiohttp_socks
+import socks
+import socket
+import tls_client
+from loguru import logger as log
 
-from pystyle import Write, System, Colors, Colorate, Anime
-from colorama import Fore, Style
 from datetime import datetime
 from aiohttp_socks import ProxyConnector, ProxyType
 from httpx import InvalidURL, RequestError
 from ipaddress import AddressValueError
+
+
+log.remove()
+log.add(sys.stdout, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level}</level> | <cyan>{message}</cyan>")
 
 https_scraped = 0
 socks4_scraped = 0
@@ -29,29 +31,6 @@ socks5_scraped = 0
 http_checked = 0
 socks4_checked = 0
 socks5_checked = 0
-
-red = Fore.RED
-yellow = Fore.YELLOW
-green = Fore.GREEN
-blue = Fore.BLUE
-orange = Fore.RED + Fore.YELLOW
-pretty = Fore.LIGHTMAGENTA_EX + Fore.LIGHTCYAN_EX
-magenta = Fore.MAGENTA
-lightblue = Fore.LIGHTBLUE_EX
-cyan = Fore.CYAN
-gray = Fore.LIGHTBLACK_EX + Fore.WHITE
-reset = Fore.RESET
-pink = Fore.LIGHTGREEN_EX + Fore.LIGHTMAGENTA_EX
-dark_green = Fore.GREEN + Style.BRIGHT
-output_lock = threading.Lock()
-
-def get_time_rn():
-    date = datetime.now()
-    hour = date.hour
-    minute = date.minute
-    second = date.second
-    timee = "{:02d}:{:02d}:{:02d}".format(hour, minute, second)
-    return timee
 
 http_links = [
     "https://api.proxyscrape.com/?request=getproxies&proxytype=https&timeout=10000&country=all&ssl=all&anonymity=all",
@@ -123,192 +102,123 @@ socks5_list = [
     "https://raw.githubusercontent.com/zloi-user/hideip.me/main/socks5.txt"
 ]
 
-def scrape_proxy_links_https(link):
-    global https_scraped
-    response = http.get(link)
-    if response.status_code == 200:
-        with output_lock:
-            time_rn = get_time_rn()
-            print(f"[ {pink}{time_rn}{reset} ] | ( {green}SUCCESS{reset} ) {pretty}Scraped --> ", end='')
-            sys.stdout.flush()
-            Write.Print(f"{link[:100]}...\n", Colors.blue_to_cyan, interval=0.000)
-        proxies = response.text.splitlines()
-        https_scraped += len(proxies)
-        return proxies
+def get_time_rn():
+    return datetime.now().strftime("%H:%M:%S")
+
+def get_date_rn():
+    return datetime.now().strftime("%d-%m-%Y")
+
+def scrape_proxy_links(link, proxy_type):
+    global https_scraped, socks4_scraped, socks5_scraped
+    try:
+        response = http.get(link)
+        if response.status_code == 200:
+            log.info(f"Scraped {proxy_type} --> {link[:100]}...")
+            proxies = response.text.splitlines()
+            if proxy_type == "https":
+                https_scraped += len(proxies)
+            elif proxy_type == "socks4":
+                socks4_scraped += len(proxies)
+            elif proxy_type == "socks5":
+                socks5_scraped += len(proxies)
+            return proxies
+    except Exception as e:
+        log.error(f"Error scraping {proxy_type} from {link}: {e}")
     return []
-
-proxies = []
-num_threads = 20
-with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
-    results = executor.map(scrape_proxy_links_https, http_links)
-    for result in results:
-        proxies.extend(result)
-
-with open("http_proxies.txt", "w") as file:
-    for proxy in proxies:
-        if ":" in proxy and not any(c.isalpha() for c in proxy):
-            file.write(f"{proxy}\n")
-
-def scrape_proxy_links_socks4(link):
-    global socks4_scraped
-    response = http.get(link)
-    if response.status_code == 200:
-        with output_lock:
-            time_rn = get_time_rn()
-            print(f"[ {pink}{time_rn}{reset} ] | ( {green}SUCCESS{reset} ) {pretty}Scraped --> ", end='')
-            sys.stdout.flush()
-            Write.Print(f"{link[:100]}...\n", Colors.blue_to_cyan, interval=0.000)
-        proxies = response.text.splitlines()
-        socks4_scraped += len(proxies)
-        return proxies
-    return []
-
-proxies = []
-num_threads = 100
-with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
-    results = executor.map(scrape_proxy_links_socks4, socks4_list)
-    for result in results:
-        proxies.extend(result)
-
-with open("socks4_proxies.txt", "w") as file:
-    for proxy in proxies:
-        if ":" in proxy and not any(c.isalpha() for c in proxy):
-            file.write(proxy + '\n')
-
-def scrape_proxy_links_socks5(link):
-    global socks5_scraped
-    response = http.get(link)
-    if response.status_code == 200:
-        with output_lock:
-            time_rn = get_time_rn()
-            print(f"[ {pink}{time_rn}{reset} ] | ( {green}SUCCESS{reset} ) {pretty}Scraped --> ", end='')
-            sys.stdout.flush()
-            Write.Print(f"{link[:100]}...\n", Colors.blue_to_cyan, interval=0.000)
-        proxies = response.text.splitlines()
-        socks5_scraped += len(proxies)
-        return proxies
-    return []
-
-proxies = []
-num_threads = 100
-with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
-    results = executor.map(scrape_proxy_links_socks5, socks5_list)
-    for result in results:
-        proxies.extend(result)
-
-with open("socks5_proxies.txt", "w") as file:
-    for proxy in proxies:
-        if ":" in proxy and not any(c.isalpha() for c in proxy):
-            file.write(proxy + '\n')
-
-time.sleep(1)
-results_directory = "results"
-
-for proto in ["http", "socks4", "socks5"]:
-    if not os.path.exists(results_directory):
-        os.mkdir(results_directory)
-    if not os.path.exists(f"{results_directory}/{proto}.txt"):
-        with open(f"{results_directory}/{proto}.txt", "w") as file:
-            file.write("")
-
-valid_http = []
-valid_socks4 = []
-valid_socks5 = []
-
-base_check_url = "http://httpbin.org/get"
 
 def check_proxy_http(proxy):
     global http_checked
-
     proxy_dict = {
         "http://": f"http://{proxy}",
         "https://": f"http://{proxy}"
     }
-
     try:
-        url = f"{base_check_url}"
-        r = http.get(url, proxies=proxy_dict, timeout=30)
+        with http.Client(proxies=proxy_dict, timeout=30) as client:
+            r = client.get("http://httpbin.org/get")
         if r.status_code == 200:
-            with output_lock:
-                time_rn = get_time_rn()
-                print(f"[ {pink}{time_rn}{reset} ] | ( {green}VALID{reset} ) {pretty}HTTP/S --> ", end='')
-                sys.stdout.flush()
-                Write.Print(proxy + "\n", Colors.cyan_to_blue, interval=0.000)
-            valid_http.append(proxy)
+            log.info(f"Valid HTTP/S --> {proxy}")
             http_checked += 1
-            with open(f"{results_directory}/http.txt", "a") as f:
-                f.write(f"{proxy}\n")
-    except (RequestError, InvalidURL):
+            return proxy
+    except Exception:
         pass
+    return None
 
-
-def checker_proxy_socks4(proxy):
-    global socks4_checked
+def check_proxy_socks(proxy, proxy_type):
+    global socks4_checked, socks5_checked
     try:
-        socks.setdefaultproxy(socks.PROXY_TYPE_SOCKS4, proxy.split(':')[0], int(proxy.split(':')[1]))
-        socket.socket = socks.socksocket
-        socket.create_connection(("www.google.com", 443), timeout=5)
-        socks4_checked += 1
-        with output_lock:
-            time_rn = get_time_rn()
-            print(f"[ {pink}{time_rn}{reset} ] | ( {green}VALID{reset} ) {pretty}SOCKS4 --> ", end='')
-            sys.stdout.flush()
-            Write.Print(proxy + "\n", Colors.cyan_to_blue, interval=0.000)
-        with open(f"{results_directory}/socks4.txt", "a+") as f:
-            f.write(f"{proxy}\n")
-    except (socks.ProxyConnectionError, socket.timeout, OSError):
+        proxy_host, proxy_port = proxy.split(':')
+        proxy_port = int(proxy_port)
+        with socks.socksocket() as s:
+            if proxy_type == "socks4":
+                s.set_proxy(socks.SOCKS4, proxy_host, proxy_port)
+            elif proxy_type == "socks5":
+                s.set_proxy(socks.SOCKS5, proxy_host, proxy_port)
+            s.settimeout(5)
+            s.connect(("www.google.com", 443))
+        log.info(f"Valid {proxy_type.upper()} -> {proxy}")
+        if proxy_type == "socks4":
+            socks4_checked += 1
+        elif proxy_type == "socks5":
+            socks5_checked += 1
+        return proxy
+    except Exception:
         pass
-
-def checker_proxy_socks5(proxy):
-    global socks5_checked
-    try:
-        socks.setdefaultproxy(socks.PROXY_TYPE_SOCKS5, proxy.split(':')[0], int(proxy.split(':')[1]))
-        socket.socket = socks.socksocket
-        socket.create_connection(("www.google.com", 443), timeout=5)
-        socks5_checked += 1
-        with output_lock:
-            time_rn = get_time_rn()
-            print(f"[ {pink}{time_rn}{reset} ] | ( {green}VALID{reset} ) {pretty}SOCKS5 --> ", end='')
-            sys.stdout.flush()
-            Write.Print(proxy + "\n", Colors.cyan_to_blue, interval=0.000)
-        with open(f"{results_directory}/socks5.txt", "a+") as f:
-            f.write(f"{proxy}\n")
-    except(socks.ProxyConnectionError, socket.timeout, OSError):
-        pass
-
-def check_all(proxy_type, pathTXT):
-    with open(pathTXT, "r") as f:
-        proxies = f.read().splitlines()
-
-    max_workers = min(100, len(proxies))  # Limit to 100 workers or less
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        results = list(executor.map(lambda p: check_proxy(proxy_type, p), proxies))
-
-    return results
+    return None
 
 
 def check_proxy(proxy_type, proxy):
-    if proxy_type.startswith("http") or proxy_type.startswith("https"):
+    if proxy_type == "http":
         return check_proxy_http(proxy)
-    elif proxy_type.startswith("socks4"):
-        return checker_proxy_socks4(proxy)
-    elif proxy_type.startswith("socks5"):
-        return checker_proxy_socks5(proxy)
+    elif proxy_type in ["socks4", "socks5"]:
+        return check_proxy_socks(proxy, proxy_type)
 
-def LetsCheckIt(proxy_types):
-    threadsCrack = []
-    for proxy_type in proxy_types:
-        if os.path.exists(f"{proxy_type}_proxies.txt"):
-            t = threading.Thread(target=check_all, args=(proxy_type, f"{proxy_type}_proxies.txt"))
-            t.start()
-            threadsCrack.append(t)
-    for t in threadsCrack:
-        t.join()
+
+def main(args):
+    results_directory = Path("results")
+    results_directory.mkdir(exist_ok=True)
+
+    # Backup old results to directory with timestamp
+    backup_directory = results_directory / get_date_rn() / get_time_rn()
+    backup_directory.mkdir()
+    for file in results_directory.glob("*.txt"):
+        shutil.move(file, backup_directory)
+
+
+    for proxy_type in ["http", "socks4", "socks5"]:
+        proxy_file = results_directory / f"{proxy_type}.txt"
+        proxy_file.touch()
+
+    # Scrape proxies
+    for proxy_type, links in [("http", http_links), ("socks4", socks4_list), ("socks5", socks5_list)]:
+        with ThreadPoolExecutor(max_workers=args.threads) as executor:
+            proxies = list(executor.map(lambda link: scrape_proxy_links(link, proxy_type), links))
+        proxies = [proxy for sublist in proxies for proxy in sublist if ":" in proxy and not any(c.isalpha() for c in proxy)]
+        with open(f"{proxy_type}_proxies.txt", "w") as file:
+            file.write("\n".join(proxies))
+
+    # Check proxies
+    for proxy_type in ["http", "socks4", "socks5"]:
+        with open(f"{proxy_type}_proxies.txt", "r") as f:
+            proxies = f.read().splitlines()
+
+        with ThreadPoolExecutor(max_workers=args.threads) as executor:
+            valid_proxies = list(filter(None, executor.map(lambda p: check_proxy(proxy_type, p), proxies)))
+
+        with open(results_directory / f"{proxy_type}.txt", "w") as f:
+            f.write("\n".join(valid_proxies))
+
+    # Clean up temporary files
+    for proxy_type in ["http", "socks4", "socks5"]:
+        os.remove(f"{proxy_type}_proxies.txt")
 
 
 if __name__ == "__main__":
-    proxy_types = ["http", "socks4", "socks5"]
-    LetsCheckIt(proxy_types)
-    os.remove("http_proxies.txt")
-    os.remove("socks4_proxies.txt")
-    os.remove("socks5_proxies.txt")
+    parser = argparse.ArgumentParser(description="Proxy scraper and checker")
+    parser.add_argument("-t", "--threads", type=int, default=100, help="Number of threads to use")
+    args = parser.parse_args()
+
+    try:
+        main(args)
+    except KeyboardInterrupt:
+        log.info("Exiting...")
+        sys.exit(0)
