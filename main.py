@@ -1,36 +1,27 @@
 import os, sys, shutil
 from concurrent.futures import ThreadPoolExecutor
 import time
-import string
-import sys
-import argparse
+from datetime import datetime
 from pathlib import Path
-
-import httpx as http
-import aiosocks
-import asyncio
-import aiohttp_socks
+import ipaddress
+import httpx
 import socks
 import socket
-import tls_client
-from loguru import logger as log
+from loguru import logger
+import argparse
+from rich.progress import Progress, TextColumn, BarColumn, TaskID
+from rich.console import Console
+from rich.live import Live
+from rich.panel import Panel
+from rich.console import Group
+from rich.control import Control
 
-from datetime import datetime
-from aiohttp_socks import ProxyConnector, ProxyType
-from httpx import InvalidURL, RequestError
-from ipaddress import AddressValueError
+console = Console()
+logger.remove()
+logger.add(lambda msg: console.print(msg, markup=True, end=""), format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level}</level> | <cyan>{message}</cyan>")
 
-
-log.remove()
-log.add(sys.stdout, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level}</level> | <cyan>{message}</cyan>")
-
-https_scraped = 0
-socks4_scraped = 0
-socks5_scraped = 0
-
-http_checked = 0
-socks4_checked = 0
-socks5_checked = 0
+https_scraped = socks4_scraped = socks5_scraped = 0
+http_checked = socks4_checked = socks5_checked = 0
 
 http_links = [
     "https://api.proxyscrape.com/?request=getproxies&proxytype=https&timeout=10000&country=all&ssl=all&anonymity=all",
@@ -102,35 +93,37 @@ socks5_list = [
     "https://raw.githubusercontent.com/zloi-user/hideip.me/main/socks5.txt"
 ]
 
-def scrape_proxy_links(link, proxy_type):
-    global https_scraped, socks4_scraped, socks5_scraped
+def is_valid_ip(ip):
     try:
-        response = http.get(link)
+        ipaddress.ip_address(ip)
+        return True
+    except ValueError:
+        return False
+
+def scrape_proxy_link(link, proxy_type):
+    try:
+        response = httpx.get(link, timeout=10)
         if response.status_code == 200:
-            log.info(f"Scraped {proxy_type} --> {link[:100]}...")
             proxies = response.text.splitlines()
-            if proxy_type == "https":
-                https_scraped += len(proxies)
-            elif proxy_type == "socks4":
-                socks4_scraped += len(proxies)
-            elif proxy_type == "socks5":
-                socks5_scraped += len(proxies)
-            return proxies
+            valid_proxies = [proxy for proxy in proxies if ":" in proxy and is_valid_ip(proxy.split(":")[0])]
+            logger.info(f"Scraped {len(valid_proxies)} {proxy_type} proxies from {link[:50]}...")
+            return valid_proxies
     except Exception as e:
-        log.error(f"Error scraping {proxy_type} from {link}: {e}")
+        logger.error(f"Error scraping {proxy_type} from {link}: {e}")
     return []
+
+def scrape_proxy_links(links, proxy_type):
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = list(executor.map(lambda link: scrape_proxy_link(link, proxy_type), links))
+    return [proxy for sublist in results for proxy in sublist]
 
 def check_proxy_http(proxy):
     global http_checked
-    proxy_dict = {
-        "http://": f"http://{proxy}",
-        "https://": f"http://{proxy}"
-    }
+    proxy_url = f"http://{proxy}"
     try:
-        with http.Client(proxies=proxy_dict, timeout=30) as client:
+        with httpx.Client(proxies={"http://": proxy_url, "https://": proxy_url}, timeout=10) as client:
             r = client.get("http://httpbin.org/get")
         if r.status_code == 200:
-            log.info(f"Valid HTTP/S --> {proxy}")
             http_checked += 1
             return proxy
     except Exception:
@@ -149,7 +142,6 @@ def check_proxy_socks(proxy, proxy_type):
                 s.set_proxy(socks.SOCKS5, proxy_host, proxy_port)
             s.settimeout(5)
             s.connect(("www.google.com", 443))
-        log.info(f"Valid {proxy_type.upper()} -> {proxy}")
         if proxy_type == "socks4":
             socks4_checked += 1
         elif proxy_type == "socks5":
@@ -159,64 +151,81 @@ def check_proxy_socks(proxy, proxy_type):
         pass
     return None
 
-
-def check_proxy(proxy_type, proxy):
+def check_proxy(proxy_type, proxy, results_file):
+    result = None
     if proxy_type == "http":
-        return check_proxy_http(proxy)
+        result = check_proxy_http(proxy)
     elif proxy_type in ["socks4", "socks5"]:
-        return check_proxy_socks(proxy, proxy_type)
+        result = check_proxy_socks(proxy, proxy_type)
 
+    if result:
+        with open(results_file, "a") as f:
+            f.write(f"{result}\n")
+        logger.info(f"Valid {proxy_type.upper()} -> {result}")
+
+    return result
+
+def backup_results(results_directory):
+    backup_directory = results_directory / 'backup' / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    backup_directory.mkdir(parents=True, exist_ok=True)
+    for file in results_directory.glob("*.txt"):
+        if file.is_file():
+            shutil.copy2(file, backup_directory)
+    logger.info(f"Backed up existing results to {backup_directory}")
 
 def main(args):
     results_directory = Path("results")
     results_directory.mkdir(exist_ok=True)
 
-    # Backup old results to directory with timestamp
     if args.backup:
-        backup_directory = results_directory / 'backup' / \
-        datetime.now().strftime("%Y-%m-%d") / \
-        datetime.now().strftime("%H:%M:%S")
-        backup_directory.mkdir(parents=True, exist_ok=True)
-        for file in results_directory.glob("*.txt"):
-            shutil.move(file, backup_directory)
+        backup_results(results_directory)
 
-
-    for proxy_type in ["http", "socks4", "socks5"]:
-        proxy_file = results_directory / f"{proxy_type}.txt"
-        proxy_file.touch()
-
-    # Scrape proxies
+    all_proxies = {}
     for proxy_type, links in [("http", http_links), ("socks4", socks4_list), ("socks5", socks5_list)]:
-        with ThreadPoolExecutor(max_workers=args.threads) as executor:
-            proxies = list(executor.map(lambda link: scrape_proxy_links(link, proxy_type), links))
-        proxies = [proxy for sublist in proxies for proxy in sublist if ":" in proxy and not any(c.isalpha() for c in proxy)]
-        with open(f"{proxy_type}_proxies.txt", "w") as file:
-            file.write("\n".join(proxies))
+        all_proxies[proxy_type] = scrape_proxy_links(links, proxy_type)
+        logger.info(f"Scraped {len(all_proxies[proxy_type])} {proxy_type} proxies")
 
-    # Check proxies
-    for proxy_type in ["http", "socks4", "socks5"]:
-        with open(f"{proxy_type}_proxies.txt", "r") as f:
-            proxies = f.read().splitlines()
+    progress = Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+    )
 
-        with ThreadPoolExecutor(max_workers=args.threads) as executor:
-            valid_proxies = list(filter(None, executor.map(lambda p: check_proxy(proxy_type, p), proxies)))
+    def get_renderable():
+        return Group(
+            Panel(progress, title="Progress", border_style="cyan"),
+            Control()
+        )
 
-        with open(results_directory / f"{proxy_type}.txt", "w") as f:
-            f.write("\n".join(valid_proxies))
+    with Live(get_renderable(), console=console, refresh_per_second=4) as live:
+        for proxy_type in ["http", "socks4", "socks5"]:
+            results_file = results_directory / f"{proxy_type}.txt"
+            total_proxies = len(all_proxies[proxy_type])
+            task = progress.add_task(f"[cyan]Checking {proxy_type}...", total=total_proxies)
 
-    # Clean up temporary files
-    for proxy_type in ["http", "socks4", "socks5"]:
-        os.remove(f"{proxy_type}_proxies.txt")
+            with ThreadPoolExecutor(max_workers=args.threads) as executor:
+                futures = [executor.submit(check_proxy, proxy_type, proxy, results_file)
+                           for proxy in all_proxies[proxy_type]]
+                for future in futures:
+                    future.result()
+                    progress.update(task, advance=1)
+                    live.refresh()
 
+    console.show_cursor()  # Ensure cursor is shown after the process is complete
+
+    logger.info("Proxy checking completed.")
+    logger.info(f"HTTP/S proxies found: {http_checked}")
+    logger.info(f"SOCKS4 proxies found: {socks4_checked}")
+    logger.info(f"SOCKS5 proxies found: {socks5_checked}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Proxy scraper and checker")
     parser.add_argument("-t", "--threads", type=int, default=100, help="Number of threads to use")
-    parser.add_argument("-b", "--backup", type=bool, default=True, action="store_true", help="Backup old results")
+    parser.add_argument("-b", "--backup", action="store_true", help="Backup old results before starting")
     args = parser.parse_args()
 
     try:
         main(args)
     except KeyboardInterrupt:
-        log.info("Exiting...")
+        logger.info("Exiting...")
         sys.exit(0)
