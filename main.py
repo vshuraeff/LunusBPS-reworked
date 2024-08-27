@@ -181,7 +181,7 @@ def backup_results(results_directory):
     backup_directory.mkdir(parents=True, exist_ok=True)
     for file in results_directory.glob("*.txt"):
         if file.is_file():
-            shutil.copy2(file, backup_directory)
+            shutil.move(file, backup_directory)
     logger.info(f"Backed up existing results to {backup_directory}")
 
 def main(args):
@@ -262,7 +262,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Proxy scraper and checker")
-    parser.add_argument("-t", "--threads", type=int, default=760, help="Number of threads to use")
+    parser.add_argument("-t", "--threads", type=int, default=500, help="Number of threads to use")
     parser.add_argument("-b", "--backup", action="store_true", help="Backup old results before starting")
     args = parser.parse_args()
 
