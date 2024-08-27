@@ -9,16 +9,27 @@ import socks
 import socket
 from loguru import logger
 import argparse
-from rich.progress import Progress, TextColumn, BarColumn, TaskID
+from rich.progress import Progress, TextColumn, BarColumn, TaskID, TimeRemainingColumn
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.console import Group
 from rich.control import Control
+from rich.text import Text
 
 console = Console()
 logger.remove()
 logger.add(lambda msg: console.print(msg, markup=True, end=""), format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level}</level> | <cyan>{message}</cyan>")
+
+def format_stats(checked, total, http_found, socks4_found, socks5_found, speed, eta):
+    return (
+        f"Checked: {checked}/{total} | "
+        f"HTTP: {http_found} | "
+        f"SOCKS4: {socks4_found} | "
+        f"SOCKS5: {socks5_found} | "
+        f"Speed: {speed:.2f} proxies/s | "
+        f"ETA: {eta}"
+    )
 
 https_scraped = socks4_scraped = socks5_scraped = 0
 http_checked = socks4_checked = socks5_checked = 0
@@ -181,14 +192,18 @@ def main(args):
         backup_results(results_directory)
 
     all_proxies = {}
+    total_proxies = 0
     for proxy_type, links in [("http", http_links), ("socks4", socks4_list), ("socks5", socks5_list)]:
         all_proxies[proxy_type] = scrape_proxy_links(links, proxy_type)
+        total_proxies += len(all_proxies[proxy_type])
         logger.info(f"Scraped {len(all_proxies[proxy_type])} {proxy_type} proxies")
 
     progress = Progress(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TimeRemainingColumn(),
+        TextColumn("{task.fields[stats]}"),
     )
 
     def get_renderable():
@@ -197,30 +212,57 @@ def main(args):
             Control()
         )
 
+    total_checked = 0
+    start_time = time.time()
     with Live(get_renderable(), console=console, refresh_per_second=4) as live:
+        task = progress.add_task(
+            "[cyan]Checking proxies...",
+            total=total_proxies,
+            stats=format_stats(0, total_proxies, 0, 0, 0, 0, "N/A")
+        )
+
         for proxy_type in ["http", "socks4", "socks5"]:
             results_file = results_directory / f"{proxy_type}.txt"
-            total_proxies = len(all_proxies[proxy_type])
-            task = progress.add_task(f"[cyan]Checking {proxy_type}...", total=total_proxies)
 
             with ThreadPoolExecutor(max_workers=args.threads) as executor:
                 futures = [executor.submit(check_proxy, proxy_type, proxy, results_file)
                            for proxy in all_proxies[proxy_type]]
                 for future in futures:
-                    future.result()
-                    progress.update(task, advance=1)
+                    result = future.result()
+                    total_checked += 1
+
+                    elapsed_time = time.time() - start_time
+                    speed = total_checked / elapsed_time if elapsed_time > 0 else 0
+                    remaining_proxies = total_proxies - total_checked
+                    eta_seconds = remaining_proxies / speed if speed > 0 else 0
+                    eta = time.strftime("%H:%M:%S", time.gmtime(eta_seconds))
+
+                    progress.update(
+                        task,
+                        advance=1,
+                        stats=format_stats(
+                            total_checked,
+                            total_proxies,
+                            http_checked,
+                            socks4_checked,
+                            socks5_checked,
+                            speed,
+                            eta
+                        )
+                    )
                     live.refresh()
 
     console.show_cursor()  # Ensure cursor is shown after the process is complete
 
     logger.info("Proxy checking completed.")
+    logger.info(f"Total proxies checked: {total_checked}/{total_proxies}")
     logger.info(f"HTTP/S proxies found: {http_checked}")
     logger.info(f"SOCKS4 proxies found: {socks4_checked}")
     logger.info(f"SOCKS5 proxies found: {socks5_checked}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Proxy scraper and checker")
-    parser.add_argument("-t", "--threads", type=int, default=100, help="Number of threads to use")
+    parser.add_argument("-t", "--threads", type=int, default=760, help="Number of threads to use")
     parser.add_argument("-b", "--backup", action="store_true", help="Backup old results before starting")
     args = parser.parse_args()
 

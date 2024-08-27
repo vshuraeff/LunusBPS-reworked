@@ -1,8 +1,8 @@
 # Proxy-Digger - Parallel Proxy Scraper & Checker
 Proxy-Digger is a fork of Lunus BPS, a tool to obtain proxies and verify if they are valid in real-time. We have added support for HTTP/s, SOCKS4, and SOCKS5. When verifying the proxies, your computer might slow down a bit due to the threads.
 
-This Version is a reworked version of the original Lunus BPS, which was made by [Some hackers(?)](https://github.com/H4cK3dR4Du/LunusBPS).
-Whire completely rewrite all codebase I've added a lot of new features and fixed some bugs.
+This Version is a reworked version of the original Lunus BPS, which was made by [some hackers(?)](https://github.com/H4cK3dR4Du/LunusBPS).
+I've completely rewrite all codebase, added a lot of new features and fixed some bugs.
 I've also added a new UI and use httpX instead of requests.
 I've added a proxy backup feature, so you can always go back to the previous scan.
 I've added command-line arguments, so you can configure the program without the need to edit the code.
@@ -31,6 +31,12 @@ pip install -r requirements.txt
 ## 📝 Usage
 ```bash
 python main.py --threads 500 --backup 0
+```
+
+## Known Issues
+- If you are using UNIX-type system like MacOS or some Linux and set `--threads` value too high you might have issue with error `OSError: [Errno 24] Too many open files: 'results/http.txt'`. To solve this issue you have to execute command
+```bash
+ulimit -n 4096 # before running the script
 ```
 
 ## Donations
