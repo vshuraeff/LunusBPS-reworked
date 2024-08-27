@@ -9,6 +9,7 @@ I've added command-line arguments, so you can configure the program without the 
 
 ## 📸 Screenshots
 [![Proxy-Digger-Screenshot.png](https://i.postimg.cc/66fyRtbh/Proxy-Digger-Screenshot.png)](https://postimg.cc/MXX6J2Sc)
+[![Screenshot-2024-08-28-at-00-00-20.png](https://i.postimg.cc/mgvbJ56D/Screenshot-2024-08-28-at-00-00-20.png)](https://postimg.cc/21xRB2YR)
 
 ## 🔥 Features
 - Proxy Scraper
