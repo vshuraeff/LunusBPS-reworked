@@ -102,12 +102,6 @@ socks5_list = [
     "https://raw.githubusercontent.com/zloi-user/hideip.me/main/socks5.txt"
 ]
 
-def get_time_rn():
-    return datetime.now().strftime("%H:%M:%S")
-
-def get_date_rn():
-    return datetime.now().strftime("%d-%m-%Y")
-
 def scrape_proxy_links(link, proxy_type):
     global https_scraped, socks4_scraped, socks5_scraped
     try:
@@ -178,10 +172,13 @@ def main(args):
     results_directory.mkdir(exist_ok=True)
 
     # Backup old results to directory with timestamp
-    backup_directory = results_directory / get_date_rn() / get_time_rn()
-    backup_directory.mkdir()
-    for file in results_directory.glob("*.txt"):
-        shutil.move(file, backup_directory)
+    if args.backup:
+        backup_directory = results_directory / 'backup' / \
+        datetime.now().strftime("%Y-%m-%d") / \
+        datetime.now().strftime("%H:%M:%S")
+        backup_directory.mkdir(parents=True, exist_ok=True)
+        for file in results_directory.glob("*.txt"):
+            shutil.move(file, backup_directory)
 
 
     for proxy_type in ["http", "socks4", "socks5"]:
@@ -215,6 +212,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Proxy scraper and checker")
     parser.add_argument("-t", "--threads", type=int, default=100, help="Number of threads to use")
+    parser.add_argument("-b", "--backup", type=bool, default=True, action="store_true", help="Backup old results")
     args = parser.parse_args()
 
     try:
