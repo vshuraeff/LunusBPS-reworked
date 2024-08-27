@@ -1,4 +1,4 @@
-alive_it
 httpx
 uvloop
 rich
+loguru
