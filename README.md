@@ -42,7 +42,6 @@ ulimit -n 4096 # before running the script
 ## Donations
 If you want to support me, you can donate me some money. I will be very grateful for any amount. [Donate](https://www.buymeacoffee.com/vshuraeff)
 ### Cryptocurrency
-# markdown table with addresses
 
 | Coin | Address |
 | --- | --- |
