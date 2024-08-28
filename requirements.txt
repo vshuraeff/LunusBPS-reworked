@@ -2,3 +2,6 @@ httpx
 uvloop
 rich
 loguru
+aiofiles
+aiohttp
+aiohttp-socks
