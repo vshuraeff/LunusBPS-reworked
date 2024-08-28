@@ -87,13 +87,16 @@ async def check_proxy(proxy, proxy_type):
                             valid_proxies[proxy_type] += 1
                             return proxy
             break  # If we reach here without exceptions, break the retry loop
-        except (ClientSSLError, ServerDisconnectedError, ssl.SSLWantReadError, RuntimeError) as e:
+        except (ClientSSLError, ServerDisconnectedError, ssl.SSLWantReadError, RuntimeError, uvloop.UVError) as e:
             if attempt == max_retries - 1:  # Last attempt
                 checked_proxies[proxy_type] += 1
+                print(f"Failed to check proxy {proxy} after {max_retries} attempts: {str(e)}")
             else:
+                print(f"Retrying proxy {proxy} after error: {str(e)}")
                 await asyncio.sleep(retry_delay)
-        except Exception:
+        except Exception as e:
             checked_proxies[proxy_type] += 1
+            print(f"Unexpected error checking proxy {proxy}: {str(e)}")
             break  # For other exceptions, don't retry
     return None
 
@@ -129,6 +132,14 @@ def backup_results(results_directory):
         if file.is_file():
             shutil.move(file, backup_directory)
     console.print(f"[yellow]Backed up existing results to {backup_directory}[/yellow]")
+
+async def safe_main(args):
+    try:
+        await main(args)
+    except uvloop.UVError as e:
+        print(f"UVLoop error occurred: {str(e)}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {str(e)}")
 
 async def main(args):
     global checked_proxies, valid_proxies, start_times
@@ -215,6 +226,6 @@ if __name__ == "__main__":
 
     uvloop.install()
     try:
-        asyncio.run(main(args))
+        asyncio.run(safe_main(args))
     except KeyboardInterrupt:
         console.print("[yellow]Exiting...[/yellow]")
