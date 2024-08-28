@@ -6,7 +6,6 @@ from pathlib import Path
 import ipaddress
 import httpx
 import socks
-import socket
 from loguru import logger
 import argparse
 from rich.progress import Progress, TextColumn, BarColumn, TaskID, TimeRemainingColumn
@@ -15,7 +14,6 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.console import Group
 from rich.control import Control
-from rich.text import Text
 
 console = Console()
 logger.remove()
