@@ -14,14 +14,14 @@ from rich.panel import Panel
 from rich.console import Group
 import argparse
 from proxy_sources import http_links, socks4_list, socks5_list
-import ssl
 import socket
 import socks
 import aiohttp
-from aiohttp import ClientTimeout, ClientSSLError, ServerDisconnectedError
+from aiohttp import ClientTimeout, ClientError
 from aiohttp_socks import ProxyConnector
 import warnings
 import logging
+import ssl
 
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 console = Console()
@@ -79,24 +79,24 @@ async def check_proxy(proxy, proxy_type):
             ssl_context.verify_mode = ssl.CERT_NONE
 
             async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-                async with session.get('http://httpbin.org/ip', proxy=proxy_auth, ssl=ssl_context) as response:
+                async with session.get('http://echo.free.beeceptor.com', proxy=proxy_auth, ssl=ssl_context) as response:
                     checked_proxies[proxy_type] += 1
                     if response.status == 200:
                         response_json = await response.json()
-                        if response_json.get('origin') == proxy_ip:
+                        if response_json.get('ip').split(":")[0] == proxy_ip:
                             valid_proxies[proxy_type] += 1
                             return proxy
             break  # If we reach here without exceptions, break the retry loop
-        except (ClientSSLError, ServerDisconnectedError, ssl.SSLWantReadError, RuntimeError, uvloop.UVError) as e:
+        except (ClientError, asyncio.TimeoutError, ssl.SSLError, RuntimeError) as e:
             if attempt == max_retries - 1:  # Last attempt
                 checked_proxies[proxy_type] += 1
-                print(f"Failed to check proxy {proxy} after {max_retries} attempts: {str(e)}")
+                console.print(f"[red]Failed to check proxy {proxy} after {max_retries} attempts: {str(e)}[/red]") if args.verbose else None
             else:
-                print(f"Retrying proxy {proxy} after error: {str(e)}")
+                console.print(f"[yellow]Retrying proxy {proxy} after error: {str(e)}[/yellow]") if args.verbose else None
                 await asyncio.sleep(retry_delay)
         except Exception as e:
             checked_proxies[proxy_type] += 1
-            print(f"Unexpected error checking proxy {proxy}: {str(e)}")
+            console.print(f"[red]Unexpected error checking proxy {proxy}: {str(e)}[/red]") if args.verbose else None
             break  # For other exceptions, don't retry
     return None
 
@@ -115,7 +115,7 @@ async def check_proxies(proxies, proxy_type, results_file, progress, task_id, co
     for proxy in proxies:
         await queue.put(proxy)
 
-    start_times[proxy_type] = int(time.time())  # Use int() to convert to integer
+    start_times[proxy_type] = int(time.time())
 
     workers = [asyncio.create_task(worker(queue, proxy_type, results_file, progress, task_id))
                for _ in range(concurrency)]
@@ -132,14 +132,6 @@ def backup_results(results_directory):
         if file.is_file():
             shutil.move(file, backup_directory)
     console.print(f"[yellow]Backed up existing results to {backup_directory}[/yellow]")
-
-async def safe_main(args):
-    try:
-        await main(args)
-    except uvloop.UVError as e:
-        print(f"UVLoop error occurred: {str(e)}")
-    except Exception as e:
-        print(f"An unexpected error occurred: {str(e)}")
 
 async def main(args):
     global checked_proxies, valid_proxies, start_times
@@ -222,10 +214,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Proxy scraper and checker")
     parser.add_argument("-c", "--concurrency", type=int, default=1000, help="Number of concurrent tasks")
     parser.add_argument("-b", "--backup", action="store_true", help="Backup old results before starting")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
     args = parser.parse_args()
 
     uvloop.install()
     try:
-        asyncio.run(safe_main(args))
+        asyncio.run(main(args))
     except KeyboardInterrupt:
         console.print("[yellow]Exiting...[/yellow]")
