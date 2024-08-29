@@ -1,5 +1,4 @@
 import asyncio
-import httpx
 import aiofiles
 from pathlib import Path
 import time
@@ -14,8 +13,6 @@ from rich.panel import Panel
 from rich.console import Group
 import argparse
 from proxy_sources import http_links, socks4_list, socks5_list
-import socket
-import socks
 import aiohttp
 from aiohttp import ClientTimeout, ClientError
 from aiohttp_socks import ProxyConnector
