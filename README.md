@@ -1,5 +1,5 @@
 # Proxy-Digger - Parallel Proxy Scraper & Checker
-Proxy-Digger is a fork of Lunus BPS, a tool to obtain proxies and verify if they are valid in real-time. We have added support for HTTP/s, SOCKS4, and SOCKS5. When verifying the proxies, your computer might slow down a bit due to the threads.
+Proxy-Digger is a fork of `Lunus BPS`, a tool to obtain proxies and verify if they are valid in real-time. We have added support for HTTP/s, SOCKS4, and SOCKS5. When verifying the proxies, your computer might slow down a bit due to the threads.
 
 This Version is a reworked version of the original Lunus BPS, which was made by [some hackers(?)](https://github.com/H4cK3dR4Du/LunusBPS).
 I've completely rewrite all codebase, added a lot of new features and fixed some bugs.
@@ -42,6 +42,7 @@ python main.py --threads 500 --backup 0
 ```bash
 ulimit -n 4096 # before running the script
 ```
+- I also recommend not using more than `-c 100` threads so as not to attract the attention of paramedics
 
 ## Donations
 If you want to support me, you can donate me some money. I will be very grateful for any amount. [Donate](https://www.buymeacoffee.com/vshuraeff)
@@ -54,4 +55,4 @@ If you want to support me, you can donate me some money. I will be very grateful
 | `ETH/ERC20/USDT` | `0x692591E7534000a1B666f2bF124a73d2aAFd4605` |
 
 ## ⚠️ DISCLAIMER / NOTES
-This github repo is for EDUCATIONAL PURPOSES ONLY. We Are NOT under any responsibility if any problems occurs.
+This GitHub repo is for EDUCATIONAL PURPOSES ONLY. We Are NOT under any responsibility if any problems occurs.

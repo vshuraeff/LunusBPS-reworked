@@ -58,10 +58,11 @@ async def check_proxy(proxy, proxy_type):
     max_retries = 3
     retry_delay = 1
 
+    proxy_ip, proxy_port = proxy.split(":")[0], proxy.split(":")[1]
+    proxy_url = f"{proxy_type}://{proxy_ip}:{proxy_port}"
+
     for attempt in range(max_retries):
         try:
-            proxy_url = f'{proxy_type}://{proxy}'
-            proxy_ip = proxy.split(':')[0]
 
             if proxy_type == 'http':
                 connector = aiohttp.TCPConnector(ssl=False)
@@ -77,24 +78,23 @@ async def check_proxy(proxy, proxy_type):
 
             async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
                 async with session.get('http://echo.free.beeceptor.com', proxy=proxy_auth, ssl=ssl_context) as response:
-                    checked_proxies[proxy_type] += 1
                     if response.status == 200:
                         response_json = await response.json()
                         if response_json.get('ip').split(":")[0] == proxy_ip:
+                            checked_proxies[proxy_type] += 1
                             valid_proxies[proxy_type] += 1
                             return proxy
             break  # If we reach here without exceptions, break the retry loop
         except (ClientError, asyncio.TimeoutError, ssl.SSLError, RuntimeError) as e:
             if attempt == max_retries - 1:  # Last attempt
-                checked_proxies[proxy_type] += 1
-                console.print(f"[red]Failed to check proxy {proxy} after {max_retries} attempts: {str(e)}[/red]") if args.verbose else None
+                console.print(f"[red]Failed to check proxy {proxy_url} after {max_retries} attempts: {str(e)}[/red]") if args.verbose else None
             else:
-                console.print(f"[yellow]Retrying proxy {proxy} after error: {str(e)}[/yellow]") if args.verbose else None
+                console.print(f"[yellow]Retrying proxy {proxy_url} after error: {str(e)}[/yellow]") if args.verbose else None
                 await asyncio.sleep(retry_delay)
         except Exception as e:
-            checked_proxies[proxy_type] += 1
-            console.print(f"[red]Unexpected error checking proxy {proxy}: {str(e)}[/red]") if args.verbose else None
+            console.print(f"[red]Unexpected error checking proxy {proxy_url}: {str(e)}[/red]") if args.verbose else None
             break  # For other exceptions, don't retry
+    checked_proxies[proxy_type] += 1
     return None
 
 async def worker(queue, proxy_type, results_file, progress, task_id):
@@ -206,6 +206,8 @@ async def main(args):
     console.print(f"Average speed: {speed:.2f} proxies/second")
     for proxy_type in checked_proxies:
         console.print(f"{proxy_type.upper()} proxies checked: {checked_proxies[proxy_type]}, valid: {valid_proxies[proxy_type]}")
+
+#     TODO: Create hook.py
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Proxy scraper and checker")
