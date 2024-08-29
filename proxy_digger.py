@@ -71,13 +71,13 @@ async def check_proxy(proxy, proxy_type):
                 connector = ProxyConnector.from_url(proxy_url, ssl=False)
                 proxy_auth = None
 
-            timeout = ClientTimeout(total=30, connect=10)
+            timeout = ClientTimeout(total=args.timeout, connect=args.connect_timeout)
             ssl_context = ssl.create_default_context()
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE
 
             async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-                async with session.get('http://echo.free.beeceptor.com', proxy=proxy_auth, ssl=ssl_context) as response:
+                async with session.get(f"{args.url}", proxy=proxy_auth, ssl=ssl_context) as response:
                     if response.status == 200:
                         response_json = await response.json()
                         if response_json.get('ip').split(":")[0] == proxy_ip:
@@ -211,9 +211,15 @@ async def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Proxy scraper and checker")
-    parser.add_argument("-c", "--concurrency", type=int, default=1000, help="Number of concurrent tasks")
+    parser.add_argument("-c", "--concurrency", type=int, default=100, help="Number of concurrent tasks")
     parser.add_argument("-b", "--backup", action="store_true", help="Backup old results before starting")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
+    parser.add_argument("-rt", "--timeout", type=int, default=10, help="Read timeout to check proxy")
+    parser.add_argument("-ct", "--connect-timeout", dest="connect_timeout" , type=int, default=5,
+                        help="Connect timeout to check proxy")
+    parser.add_argument("-u", "--url", type=str, default='http://echo.free.beeceptor.com',
+                        help="URL Address to check (Expected to return JSON doc with `IP` element to compare address)")
+
     args = parser.parse_args()
 
     uvloop.install()
