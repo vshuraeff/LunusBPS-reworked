@@ -1,4 +1,6 @@
 import asyncio
+import os
+
 import aiofiles
 from pathlib import Path
 import time
@@ -23,10 +25,11 @@ import ssl
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 console = Console()
 
-# Global counters
+# Global counters with asyncio.Lock
 checked_proxies = {'http': 0, 'socks4': 0, 'socks5': 0}
 valid_proxies = {'http': 0, 'socks4': 0, 'socks5': 0}
 start_times = {'http': 0, 'socks4': 0, 'socks5': 0}
+lock = asyncio.Lock()
 
 # Suppress specific RuntimeWarnings
 warnings.filterwarnings("ignore", category=RuntimeWarning, message="Enable tracemalloc to get the object allocation traceback")
@@ -36,15 +39,15 @@ warnings.filterwarnings("ignore", category=RuntimeWarning, message="An HTTPS req
 logging.getLogger("asyncio").setLevel(logging.ERROR)
 logging.getLogger("aiohttp").setLevel(logging.ERROR)
 
-async def download_proxies(session, url):
+async def download_proxies(session, url, proxy_type):
     try:
         async with session.get(url, timeout=30) as response:
             if response.status == 200:
                 proxies = (await response.text()).splitlines()
-                return [proxy for proxy in proxies if ':' in proxy and await is_valid_ip(proxy.split(':')[0])]
-    except Exception:
-        pass
-    return []
+                return proxy_type, [proxy for proxy in proxies if ':' in proxy and await is_valid_ip(proxy.split(':')[0])]
+    except Exception as e:
+        console.print(f"[red]Error downloading proxies from {url}: {str(e)}[/red]") if args.verbose else None
+    return proxy_type, []
 
 async def is_valid_ip(ip):
     try:
@@ -53,7 +56,7 @@ async def is_valid_ip(ip):
     except ValueError:
         return False
 
-async def check_proxy(proxy, proxy_type):
+async def check_proxy(proxy, proxy_type, args):
     global checked_proxies, valid_proxies
     max_retries = 3
     retry_delay = 1
@@ -61,9 +64,12 @@ async def check_proxy(proxy, proxy_type):
     proxy_ip, proxy_port = proxy.split(":")[0], proxy.split(":")[1]
     proxy_url = f"{proxy_type}://{proxy_ip}:{proxy_port}"
 
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+
     for attempt in range(max_retries):
         try:
-
             if proxy_type == 'http':
                 connector = aiohttp.TCPConnector(ssl=False)
                 proxy_auth = proxy_url
@@ -72,17 +78,15 @@ async def check_proxy(proxy, proxy_type):
                 proxy_auth = None
 
             timeout = ClientTimeout(total=args.timeout, connect=args.connect_timeout)
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
 
             async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
                 async with session.get(f"{args.url}", proxy=proxy_auth, ssl=ssl_context) as response:
                     if response.status == 200:
                         response_json = await response.json()
                         if response_json.get('ip').split(":")[0] == proxy_ip:
-                            checked_proxies[proxy_type] += 1
-                            valid_proxies[proxy_type] += 1
+                            async with lock:
+                                checked_proxies[proxy_type] += 1
+                                valid_proxies[proxy_type] += 1
                             return proxy
             break  # If we reach here without exceptions, break the retry loop
         except (ClientError, asyncio.TimeoutError, ssl.SSLError, RuntimeError) as e:
@@ -94,27 +98,29 @@ async def check_proxy(proxy, proxy_type):
         except Exception as e:
             console.print(f"[red]Unexpected error checking proxy {proxy_url}: {str(e)}[/red]") if args.verbose else None
             break  # For other exceptions, don't retry
-    checked_proxies[proxy_type] += 1
+    async with lock:
+        checked_proxies[proxy_type] += 1
     return None
 
-async def worker(queue, proxy_type, results_file, progress, task_id):
+async def worker(queue, proxy_type, results_file, progress, task_id, args):
     while True:
         proxy = await queue.get()
-        result = await check_proxy(proxy, proxy_type)
+        result = await check_proxy(proxy, proxy_type, args)
         if result:
-            async with aiofiles.open(results_file, 'a') as f:
-                await f.write(f"{result}\n")
+            async with lock:
+                with open(results_file, 'a+') as f:
+                    f.write(f"{result}\n")
         progress.update(task_id, advance=1, checked=checked_proxies[proxy_type], valid=valid_proxies[proxy_type])
         queue.task_done()
 
-async def check_proxies(proxies, proxy_type, results_file, progress, task_id, concurrency):
+async def check_proxies(proxies, proxy_type, results_file, progress, task_id, concurrency, args):
     queue = asyncio.Queue()
     for proxy in proxies:
         await queue.put(proxy)
 
     start_times[proxy_type] = int(time.time())
 
-    workers = [asyncio.create_task(worker(queue, proxy_type, results_file, progress, task_id))
+    workers = [asyncio.create_task(worker(queue, proxy_type, results_file, progress, task_id, args))
                for _ in range(concurrency)]
 
     await queue.join()
@@ -144,16 +150,16 @@ async def main(args):
         'socks5': socks5_list
     }
 
-    all_proxies = {}
+    all_proxies = {'http': [], 'socks4': [], 'socks5': []}
     async with aiohttp.ClientSession() as session:
-        for proxy_type, urls in proxy_sources.items():
-            all_proxies[proxy_type] = []
-            tasks = [download_proxies(session, url) for url in urls]
-            results = await asyncio.gather(*tasks)
-            for proxies in results:
-                all_proxies[proxy_type].extend(proxies)
+        tasks = [download_proxies(session, url, proxy_type) for proxy_type, urls in proxy_sources.items() for url in urls]
+        results = await asyncio.gather(*tasks)
+        for proxy_type, proxies in results:
+            all_proxies[proxy_type].extend(proxies)
             all_proxies[proxy_type] = list(set(all_proxies[proxy_type]))  # Remove duplicates
-            console.print(f"Total {proxy_type.upper()} proxies: {len(all_proxies[proxy_type])}")
+
+    for proxy_type in all_proxies:
+        console.print(f"Total {proxy_type.upper()} proxies: {len(all_proxies[proxy_type])}")
 
     total_proxies = sum(len(proxies) for proxies in all_proxies.values())
 
@@ -169,7 +175,7 @@ async def main(args):
 
     def get_renderable():
         return Group(
-            Panel(progress, title="Progress", border_style="cyan"),
+            Panel(progress, title="Checking proxies", border_style="cyan"),
         )
 
     start_time = time.time()
@@ -190,8 +196,8 @@ async def main(args):
         update_task = asyncio.create_task(update_progress())
 
         for proxy_type, proxies in all_proxies.items():
-            results_file = results_dir / f'{proxy_type}.txt'
-            await check_proxies(proxies, proxy_type, results_file, progress, tasks[proxy_type], args.concurrency)
+            results_file = results_dir / f"{proxy_type}.txt"
+            await check_proxies(proxies, proxy_type, results_file, progress, tasks[proxy_type], args.concurrency, args)
 
         await update_task
 
@@ -204,10 +210,13 @@ async def main(args):
     console.print(f"Total proxies checked: {total_checked}")
     console.print(f"Total valid proxies found: {total_valid}")
     console.print(f"Average speed: {speed:.2f} proxies/second")
+
     for proxy_type in checked_proxies:
         console.print(f"{proxy_type.upper()} proxies checked: {checked_proxies[proxy_type]}, valid: {valid_proxies[proxy_type]}")
 
-#     TODO: Create hook.py
+async def execute_hook(args):
+    os.system(f"{args.hook}") if args.hook else None
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Proxy scraper and checker")
@@ -219,6 +228,7 @@ if __name__ == "__main__":
                         help="Connect timeout to check proxy")
     parser.add_argument("-u", "--url", type=str, default='http://echo.free.beeceptor.com',
                         help="URL Address to check (Expected to return JSON doc with `IP` element to compare address)")
+    parser.add_argument("-hk", "--hook", type=str, default=None, help="Execute a command after completion")
 
     args = parser.parse_args()
 
